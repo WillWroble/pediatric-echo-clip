@@ -256,6 +256,21 @@ def plot_probe_umap(coords, y_true, scores, target, auroc, path):
     print(f"  Saved {path.name}")
 
 
+def plot_lvef_scatter(y_true, preds, mae, r, path):
+    valid = ~np.isnan(y_true) & ~np.isnan(preds)
+    y, p = y_true[valid], preds[valid]
+    fig, ax = plt.subplots(figsize=(7, 7))
+    ax.scatter(y, p, s=4, alpha=0.3, color="steelblue")
+    lo, hi = min(y.min(), p.min()), max(y.max(), p.max())
+    ax.plot([lo, hi], [lo, hi], "k--", linewidth=0.8)
+    ax.set_xlabel("Actual LVEF")
+    ax.set_ylabel("Predicted LVEF")
+    ax.set_title(f"LVEF: Actual vs Predicted  (MAE={mae:.2f}, R={r:.3f}, n={len(y)})")
+    ax.set_aspect("equal")
+    plt.tight_layout()
+    plt.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved {path.name}")
 def plot_lvef_umap(coords, y_true, preds, mae, path_pred, path_err):
     valid = ~np.isnan(y_true) & ~np.isnan(preds)
     if valid.sum() == 0:
@@ -471,10 +486,11 @@ def eval_side(Z_train, train_ids, Z_val, val_ids, out,
             mae = None
 
         if mae is not None:
-            print(f"    LVEF: MAE={mae:.2f}  (val_n={int(va_mask_lvef.sum())})")
+            r = float(np.corrcoef(preds, y_va_lvef[va_mask_lvef])[0, 1])
+            print(f"    LVEF: MAE={mae:.2f}  R={r:.3f}  (val_n={int(va_mask_lvef.sum())})")
             full_preds = np.full(len(val_ids), np.nan)
             full_preds[va_mask_lvef] = preds
-            lvef_result = dict(target="LVEF", mae=mae, n_val=int(va_mask_lvef.sum()),
+            lvef_result = dict(target="LVEF", mae=mae, r=r, n_val=int(va_mask_lvef.sum()),
                                preds_val=full_preds, y_val=y_va_lvef)
         else:
             lvef_result = None
@@ -519,16 +535,15 @@ def eval_side(Z_train, train_ids, Z_val, val_ids, out,
         torch.save(weights_to_save, out / "probe_weights.pt")
         print(f"  Saved {out / 'probe_weights.pt'}")
 
+
     if lvef_result is not None:
         pd.DataFrame([{"target": "LVEF", "mae": lvef_result["mae"],
-                       "n_val": lvef_result["n_val"]}]).to_csv(
+                       "r": lvef_result["r"], "n_val": lvef_result["n_val"]}]).to_csv(
             out / "results_lvef.csv", index=False)
         print(f"  Saved {out / 'results_lvef.csv'}")
-        plot_lvef_umap(coords, lvef_result["y_val"], lvef_result["preds_val"],
-                       lvef_result["mae"],
-                       umap_dir / "umap_lvef_predicted.png",
-                       umap_dir / "umap_lvef_error.png")
-
+        plot_lvef_scatter(lvef_result["y_val"], lvef_result["preds_val"],
+                          lvef_result["mae"], lvef_result["r"],
+                          out / "lvef_actual_vs_predicted.png")
     return results
 
 

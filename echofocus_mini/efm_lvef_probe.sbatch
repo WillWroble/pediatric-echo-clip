@@ -5,7 +5,7 @@
 #SBATCH --array=0-3
 #SBATCH --mem=128G
 #SBATCH --gres=gpu:1
-#SBATCH --time=24:00:00
+#SBATCH --time=4:00:00
 
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/env
@@ -17,8 +17,8 @@ FRACS=(1.0 0.5 0.25 0.1)
 FRAC=${FRACS[$SLURM_ARRAY_TASK_ID]}
 
 python -u train_echofocusmini.py \
-    --embeddings ${EMBEDDINGS:-infonce_gelu.npz} \
+    --embeddings ${EMBEDDINGS:-../video_pretraining_v2/embeddings/jepa_encode_umap_v1.npz} \
     --labels /lab-share/Cardio-Mayourian-e2/Public/EchoFocus_Features/Bill_Features/Subgroup_Details_from_ECGLVEF.csv \
     --train_frac $FRAC \
-    --output_dir results/efm_infonce_frac${FRAC}
+    --output_dir results/efm_jepa_encode_v1_frac${FRAC}
 

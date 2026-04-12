@@ -62,7 +62,7 @@ def load_data(args):
 
     # Embeddings: (N_clips, D) with parallel study_ids
     print(f"Loading {args.embeddings} ...", flush=True)
-    data = np.load(args.embeddings)
+    data = np.load(args.embeddings, allow_pickle=True)
     all_embs = data["embeddings"]
     all_sids = data["study_ids"].astype(str)
     input_dim = all_embs.shape[1]

@@ -131,6 +131,7 @@ def main():
     p.add_argument("--split", choices=["val", "train"], default="val")
     p.add_argument("--subsample", type=int, default=2000, help="Also eval on a random subsample")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--manifest", default=None, help="Filter study queries to these IDs; gallery = full report pool")
     args = p.parse_args()
 
     out = Path(args.output_dir)
@@ -158,9 +159,32 @@ def main():
         print("No EchoFocus checkpoint — L2-normalizing video embeddings directly")
         v_embs = v_embs / (np.linalg.norm(v_embs, axis=1, keepdims=True) + 1e-8)
 
+    
     # Align
     R, V, shared = align(r_embs, r_ids, v_embs, v_ids)
     print(f"\nAligned {len(shared):,} studies", flush=True)
+
+    if args.manifest:
+        keep = set(Path(args.manifest).read_text().strip().splitlines())
+        sid_to_idx = {sid: i for i, sid in enumerate(shared)}
+        q_idx = np.array([sid_to_idx[s] for s in keep if s in sid_to_idx])
+        print(f"Queries: {len(q_idx):,} / {len(keep):,} requested  Gallery: {len(shared):,}", flush=True)
+
+        sim = V[q_idx] @ R.T
+        ks = [k for k in args.ks if k <= sim.shape[1]]
+        print(f"\n--- Study -> Report ---")
+        results = {}
+        for k in ks:
+            top_k = np.argpartition(-sim, kth=min(k, sim.shape[1] - 1), axis=1)[:, :k]
+            hits = sum(q_idx[i] in top_k[i] for i in range(len(q_idx)))
+            results[f"R@{k}"] = round(hits / len(q_idx), 4)
+            print(f"  R@{k}: {results[f'R@{k}']:.4f}  ({hits}/{len(q_idx)})")
+
+        name = Path(args.manifest).stem
+        pd.DataFrame([{"manifest": name, "n_queries": len(q_idx), **results}]).to_csv(
+            out / f"retrieval_{name}.csv", index=False)
+        print(f"\nDone -> {out}/retrieval_{name}.csv")
+        return
 
     ks = [k for k in args.ks if k <= len(shared)]
 

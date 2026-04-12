@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=analyze
 #SBATCH --output=/lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/logs/analyze_%j.out
-#SBATCH --mem=32G
+#SBATCH --mem=256G
 #SBATCH --time=01:00:00
 
 source ~/miniconda3/etc/profile.d/conda.sh

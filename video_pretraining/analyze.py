@@ -95,7 +95,7 @@ def plot_similarity_histograms(embs, study_ids, title, ax):
 
 
 def main(args):
-    data = np.load(args.input)
+    data = np.load(args.input, allow_pickle=True)
     embs_all = data["embeddings"].astype(np.float32)
     sids_all = data["study_ids"]
 

@@ -2,8 +2,8 @@
 #SBATCH --job-name=line_cluster
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=512G
-#SBATCH --partition=bch-compute
-#SBATCH --time=08:00:00
+#SBATCH --partition=bch-compute-pe
+#SBATCH --time=04:00:00
 #SBATCH --output=/lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer/logs/cluster_%j.out
 #SBATCH --error=/lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer/logs/cluster_%j.err
 

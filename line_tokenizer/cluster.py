@@ -164,61 +164,6 @@ def build_codebook(texts, embs, counts, labels):
 
 
 # ---------------------------------------------------------------------------
-# Visualization
-# ---------------------------------------------------------------------------
-
-def make_umap_plot(embs_2d, labels, texts, counts, output_path, n_annotate_clusters=10, n_annotate_per=3):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(16, 12))
-
-    # Noise points
-    noise_mask = labels == -1
-    if noise_mask.any():
-        ax.scatter(embs_2d[noise_mask, 0], embs_2d[noise_mask, 1],
-                   c="lightgray", s=1, alpha=0.3, label="noise", rasterized=True)
-
-    # Cluster points
-    cluster_mask = ~noise_mask
-    if cluster_mask.any():
-        sc = ax.scatter(embs_2d[cluster_mask, 0], embs_2d[cluster_mask, 1],
-                        c=labels[cluster_mask], cmap="tab20", s=2, alpha=0.5, rasterized=True)
-
-    # Annotate top clusters
-    cluster_ids = sorted(set(labels) - {-1})
-    sizes = [(cid, (labels == cid).sum()) for cid in cluster_ids]
-    sizes.sort(key=lambda x: -x[1])
-
-    for cid, _ in sizes[:n_annotate_clusters]:
-        mask = labels == cid
-        cluster_embs = embs_2d[mask]
-        cluster_texts = [texts[i] for i in range(len(texts)) if mask[i]]
-
-        centroid = cluster_embs.mean(axis=0)
-        dists = np.linalg.norm(cluster_embs - centroid, axis=1)
-        nearest = dists.argsort()[:n_annotate_per]
-
-        for idx in nearest:
-            x, y = cluster_embs[idx]
-            txt = cluster_texts[idx]
-            if len(txt) > 60:
-                txt = txt[:57] + "..."
-            ax.annotate(txt, (x, y), fontsize=5, alpha=0.8,
-                        bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="gray", alpha=0.7))
-
-    n_clusters = len(cluster_ids)
-    n_noise_count = int(noise_mask.sum())
-    ax.set_title(f"Line Embeddings — {n_clusters:,} clusters, {n_noise_count:,} noise")
-    ax.set_xticks([])
-    ax.set_yticks([])
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Saved UMAP plot: {output_path}", flush=True)
-
-
-# ---------------------------------------------------------------------------
 # Inspection + summary
 # ---------------------------------------------------------------------------
 
@@ -376,8 +321,8 @@ def main():
 
         if args.min_members > 1:
             from collections import Counter
-            counts = Counter(labels)
-            small = {c for c, n in counts.items() if c != -1 and n < args.min_members}
+            label_counts = Counter(labels)
+            small = {c for c, n in label_counts.items() if c != -1 and n < args.min_members}
             for i in range(len(labels)):
                 if labels[i] in small:
                     labels[i] = -1
@@ -387,16 +332,6 @@ def main():
     n_clusters = labels.max() + 1
     n_noise = int((labels == -1).sum())
 
-    # 2D UMAP for visualization
-    import umap
-    print("UMAP: 2D for visualization ...", flush=True)
-    vis_reducer = umap.UMAP(
-        n_components=2, metric="cosine",
-        n_neighbors=30, min_dist=0.1, random_state=42,
-    )
-    embs_2d = vis_reducer.fit_transform(embs)
-
-    make_umap_plot(embs_2d, labels, texts, counts, out / "umap_clusters.png")
 
     # Codebook
     cids, centroids, rep_texts, sizes = build_codebook(texts, embs, counts, labels)
@@ -410,7 +345,7 @@ def main():
 
     # Full mapping
     np.savez(out / "all_lines.npz", texts=np.array(texts, dtype=object),
-             counts=counts, labels=labels, umap_2d=embs_2d)
+             counts=counts, labels=labels)
     print(f"Saved all outputs to {out}", flush=True)
 
 
