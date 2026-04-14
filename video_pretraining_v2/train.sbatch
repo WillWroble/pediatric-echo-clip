@@ -2,15 +2,15 @@
 #SBATCH --job-name=vp2_train
 #SBATCH --output=/lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/video_pretraining_v2/logs/train_%j.out
 #SBATCH --error=/lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/video_pretraining_v2/logs/train_%j.err
-#SBATCH --partition=bch-gpu
-##SBATCH --partition=bch-compute-pe
+##SBATCH --partition=bch-gpu
+#SBATCH --partition=bch-gpu-pe
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:large:8
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=750G
 #SBATCH --time=1-00:00:00
-#SBATCH --exclude=gpu-b11-1
+##SBATCH --exclude=gpu-b11-1
 
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/env
