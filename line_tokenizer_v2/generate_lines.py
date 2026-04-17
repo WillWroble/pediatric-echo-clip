@@ -1,15 +1,15 @@
 """Score all pool lines against each eval study via cross-attention.
 
-Same output format as generate.py: hotspots + reference.
+Same output format as generate.py: hotspots + reference, now per-field.
 
 Usage:
     python -u generate_lines.py \
-        --checkpoint results/v1/latest.pt \
+        --checkpoint results/v2/best.pt \
         --video_embeddings /path/to/infonce_768_all.npz \
-        --h5_path /path/to/study_findings.h5 \
+        --h5_dir /path/to/line_tokenizer/data \
         --pool_manifest /path/to/train_modern.txt \
         --eval_manifest /path/to/eval_manifest.txt \
-        --output results/v1/line_scores.json
+        --output results/v2/line_scores.json
 """
 
 import argparse
@@ -25,7 +25,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
 
 from model import LineEncoder, CrossAttentionPool
-
+from dataset import merge_soft_wraps
 
 def load_video_embeddings_by_study(npz_path):
     data = np.load(npz_path)
@@ -41,9 +41,9 @@ def collect_pool_lines(h5_path, manifest_path, line_filters=None):
     if line_filters:
         patterns = [re.compile(l.strip(), re.IGNORECASE)
                     for l in open(line_filters) if l.strip() and not l.startswith("#")]
-    
+
     manifest = set(str(int(float(x))) for x in Path(manifest_path).read_text().strip().splitlines())
-    
+
     unique = set()
     with h5py.File(h5_path, "r") as f:
         for sid_raw in f.keys():
@@ -51,11 +51,11 @@ def collect_pool_lines(h5_path, manifest_path, line_filters=None):
             if sid not in manifest:
                 continue
             lines = [x.decode("utf-8") if isinstance(x, bytes) else x for x in f[sid_raw][()]]
+            lines = merge_soft_wraps(lines)
             if patterns:
                 lines = [l for l in lines if not any(p.search(l) for p in patterns)]
             unique.update(lines)
-    
-    print(f"Collected {len(unique):,} unique pool lines", flush=True)
+
     return sorted(unique)
 
 
@@ -72,6 +72,7 @@ def load_study_lines(h5_path, study_ids, line_filters=None):
             if sid not in ids_set:
                 continue
             lines = [x.decode("utf-8") if isinstance(x, bytes) else x for x in f[sid_raw][()]]
+            lines = merge_soft_wraps(lines)
             if patterns:
                 lines = [l for l in lines if not any(p.search(l) for p in patterns)]
             study_lines[sid] = lines
@@ -88,7 +89,7 @@ def encode_lines(lines, encoder, tokenizer, device, batch_size=512):
         embs = encoder(tokens.input_ids.to(device), tokens.attention_mask.to(device))
         all_embs.append(embs.cpu())
         if (i // batch_size + 1) % 100 == 0:
-            print(f"  Encoded {i + len(batch):,}/{len(lines):,}", flush=True)
+            print(f"    Encoded {i + len(batch):,}/{len(lines):,}", flush=True)
     return torch.cat(all_embs, dim=0)
 
 
@@ -96,12 +97,12 @@ def encode_lines(lines, encoder, tokenizer, device, batch_size=512):
 def score_study(line_embs, videos, pool, device):
     line_embs = line_embs.to(device)
     videos_t = torch.from_numpy(videos).to(device)
-    
+
     Q = pool.W_Q(line_embs)
     K = pool.W_K(videos_t)
     attn = (Q @ K.T) * pool.scale
     attended = attn.softmax(dim=-1) @ videos_t
-    
+
     logits = (line_embs * attended).sum(dim=-1)
     return torch.sigmoid(logits).cpu().numpy()
 
@@ -113,7 +114,6 @@ def find_hotspots(scores, line_embs, threshold=0.3, linkage_cutoff=0.85):
     if len(active) == 1:
         return [[(int(active[0]), float(scores[active[0]]))]]
 
-    # Cosine sim on active lines only
     active_embs = line_embs[active].numpy()
     norms = np.linalg.norm(active_embs, axis=1, keepdims=True) + 1e-8
     active_norm = active_embs / norms
@@ -138,10 +138,11 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoint", required=True)
     p.add_argument("--video_embeddings", required=True)
-    p.add_argument("--h5_path", required=True)
+    p.add_argument("--h5_dir", required=True)
     p.add_argument("--pool_manifest", required=True)
     p.add_argument("--eval_manifest", required=True)
     p.add_argument("--output", required=True)
+    p.add_argument("--fields", nargs="+", default=["study_findings", "summary", "history"])
     p.add_argument("--line_filters", default=None)
     p.add_argument("--threshold", type=float, default=0.3)
     p.add_argument("--linkage_cutoff", type=float, default=0.85)
@@ -161,11 +162,6 @@ def main():
     pool.eval()
     print("Loaded checkpoint", flush=True)
 
-    # Collect and encode pool lines once
-    pool_lines = collect_pool_lines(args.h5_path, args.pool_manifest, args.line_filters)
-    line_embs = encode_lines(pool_lines, encoder, tokenizer, device)
-    print(f"Encoded {len(pool_lines):,} pool lines", flush=True)
-
     # Load videos
     video_embs = load_video_embeddings_by_study(args.video_embeddings)
     print(f"Loaded {len(video_embs):,} studies with video embeddings", flush=True)
@@ -175,47 +171,69 @@ def main():
     ids = [s for s in video_embs.keys() if s in eval_ids]
     print(f"Eval manifest: {len(ids):,} studies", flush=True)
 
-    # Load reference lines for eval studies
-    study_lines = load_study_lines(args.h5_path, ids, args.line_filters)
+    # Per-field: collect pool lines, encode, load reference lines
+    pool_lines = {}
+    line_embs = {}
+    line_to_idx = {}
+    study_lines = {}
 
-    # Build line -> index mapping
-    line_to_idx = {l: i for i, l in enumerate(pool_lines)}
+    for field in args.fields:
+        h5_path = f"{args.h5_dir}/{field}.h5"
+        print(f"\n[{field}]", flush=True)
 
+        pool_lines[field] = collect_pool_lines(h5_path, args.pool_manifest, args.line_filters)
+        print(f"  Pool: {len(pool_lines[field]):,} unique lines", flush=True)
+
+        line_embs[field] = encode_lines(pool_lines[field], encoder, tokenizer, device)
+        print(f"  Encoded {len(pool_lines[field]):,} lines", flush=True)
+
+        study_lines[field] = load_study_lines(h5_path, ids, args.line_filters)
+        print(f"  Reference: {len(study_lines[field]):,} studies", flush=True)
+
+        line_to_idx[field] = {l: i for i, l in enumerate(pool_lines[field])}
+
+    # Generate per-study, per-field
+    print(f"\nGenerating heatmaps...", flush=True)
     results = []
     for i, sid in enumerate(ids):
-        scores = score_study(line_embs, video_embs[sid], pool, device)
-        hotspots = find_hotspots(scores, line_embs, args.threshold, args.linkage_cutoff)
+        videos = video_embs[sid]
+        result = {"study_id": sid}
 
-        hotspot_data = []
-        for h_members in hotspots:
-            top = h_members[:args.top_k]
-            hotspot_data.append([
-                {"score": round(score, 4), "text": pool_lines[idx]}
-                for idx, score in top
-            ])
+        for field in args.fields:
+            scores = score_study(line_embs[field], videos, pool, device)
+            hotspots = find_hotspots(scores, line_embs[field], args.threshold, args.linkage_cutoff)
 
-        # Reference: score actual lines from this study
-        ref_lines = study_lines.get(sid, [])
-        ref_data = []
-        n_unmapped = 0
-        for line in ref_lines:
-            idx = line_to_idx.get(line)
-            if idx is not None:
-                ref_data.append({"text": line, "score": round(float(scores[idx]), 4)})
-            else:
-                n_unmapped += 1
+            hotspot_data = []
+            for h_members in hotspots:
+                top = h_members[:args.top_k]
+                hotspot_data.append([
+                    {"score": round(score, 4), "text": pool_lines[field][idx]}
+                    for idx, score in top
+                ])
 
-        top_scores = np.sort(scores)[::-1]
+            ref_lines = study_lines[field].get(sid, [])
+            ref_data = []
+            n_unmapped = 0
+            for line in ref_lines:
+                idx = line_to_idx[field].get(line)
+                if idx is not None:
+                    ref_data.append({"text": line, "score": round(float(scores[idx]), 4)})
+                else:
+                    ref_data.append({"text": line, "score": None})
+                    n_unmapped += 1
 
-        results.append({
-            "study_id": sid,
-            "n_hotspots": len(hotspot_data),
-            "n_active": int((scores > args.threshold).sum()),
-            "n_unmapped": n_unmapped,
-            "top_5_scores": [round(float(s), 4) for s in top_scores[:5]],
-            "hotspots": hotspot_data,
-            "reference": ref_data,
-        })
+            top_scores = np.sort(scores)[::-1]
+
+            result[field] = {
+                "n_hotspots": len(hotspot_data),
+                "n_active": int((scores > args.threshold).sum()),
+                "n_unmapped": n_unmapped,
+                "top_5_scores": [round(float(s), 4) for s in top_scores[:5]],
+                "hotspots": hotspot_data,
+                "reference": ref_data,
+            }
+
+        results.append(result)
 
         if (i + 1) % 100 == 0:
             print(f"  {i + 1}/{len(ids)}", flush=True)
@@ -224,10 +242,12 @@ def main():
     with open(args.output, "w") as f:
         json.dump(results, f, indent=2)
 
-    total_unmapped = sum(r["n_unmapped"] for r in results)
-    total_ref = sum(len(r["reference"]) + r["n_unmapped"] for r in results)
-    print(f"Saved {len(results)} studies to {args.output}", flush=True)
-    print(f"Unmapped: {total_unmapped}/{total_ref} ({100*total_unmapped/max(total_ref,1):.1f}%)", flush=True)
+    # Summary stats
+    print(f"\nSaved {len(results)} studies to {args.output}", flush=True)
+    for field in args.fields:
+        total_unmapped = sum(r[field]["n_unmapped"] for r in results)
+        total_ref = sum(len(r[field]["reference"]) + r[field]["n_unmapped"] for r in results)
+        print(f"  {field}: unmapped {total_unmapped}/{total_ref} ({100*total_unmapped/max(total_ref,1):.1f}%)", flush=True)
 
 
 if __name__ == "__main__":
