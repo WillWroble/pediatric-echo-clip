@@ -115,10 +115,11 @@ def main():
     p.add_argument("--output_dir", required=True)
     p.add_argument("--num_clips", type=int, default=4)
     p.add_argument("--batch_size", type=int, default=8)
+    p.add_argument("--n_tasks", type=int, default=128)
     args = p.parse_args()
 
     task_id = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0))
-    n_tasks = int(os.environ.get("SLURM_ARRAY_TASK_COUNT", 1))
+    n_tasks = args.n_tasks #int(os.environ.get("SLURM_ARRAY_TASK_COUNT", 1))
 
     device = torch.device("cuda")
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)

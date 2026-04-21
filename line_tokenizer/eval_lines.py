@@ -43,7 +43,15 @@ TEXT_FIELDS = [
 # ---------------------------------------------------------------------------
 # Parsing helpers
 # ---------------------------------------------------------------------------
-
+def merge_soft_wraps(lines):
+    """Merge lines that are soft-wrapped (continuation of previous line)."""
+    merged = []
+    for line in lines:
+        if merged and (line and line[0].islower() or (merged[-1] and merged[-1].endswith('-'))):
+            merged[-1] = merged[-1].rstrip('-') + line
+        else:
+            merged.append(line)
+    return merged
 def parse_study_date(s):
     try:
         return datetime.strptime(s, "%m%d%y%H%M%S")
@@ -150,6 +158,8 @@ def build_mean_metadata(h5_dir, target_lines, manifest, field, death_mrns):
                 lines = [x.decode("utf-8") if isinstance(x, bytes) else str(x)
                          for x in grp[text_key][:]]
 
+                lines = merge_soft_wraps(lines)  # add this
+
                 for line in lines:
                     if line not in target_set:
                         continue
@@ -244,6 +254,8 @@ def load_legacy_lines(h5_dir, manifest, field, ignore_patterns, death_mrns):
                 embs = grp[field][:].astype(np.float32)
                 lines = [x.decode("utf-8") if isinstance(x, bytes) else str(x)
                          for x in grp[text_key][:]]
+
+                lines = merge_soft_wraps(lines)  # add this
 
                 for line, emb in zip(lines, embs):
                     if ignore_patterns and any(p.search(line) for p in ignore_patterns):
@@ -475,7 +487,7 @@ def main():
     # ---- UMAP ----
     print("\nFitting UMAP...", flush=True)
     coords = UMAP(
-        n_neighbors=30, min_dist=0.3, metric="cosine", random_state=args.seed,
+        n_neighbors=10, min_dist=0.1, metric="cosine", random_state=args.seed,
     ).fit_transform(embs)
 
     plot_colored(coords, years, "Mean Study Date", out / "umap_study_date.png", cmap="viridis")

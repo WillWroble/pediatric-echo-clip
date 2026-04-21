@@ -119,7 +119,7 @@ def load_data(args):
 
 @torch.no_grad()
 def evaluate(model, loader, device):
-    """Returns MAE on 0–100 scale."""
+    """Returns MAE (0–100 scale) and R²."""
     model.eval()
     preds, trues = [], []
     for emb, label in loader:
@@ -128,8 +128,13 @@ def evaluate(model, loader, device):
         trues.append(label)
     preds = torch.cat(preds)
     trues = torch.cat(trues)
-    return (preds - trues).abs().mean().item() * 100
-
+    
+    mae = (preds - trues).abs().mean().item() * 100
+    ss_res = ((preds - trues) ** 2).sum()
+    ss_tot = ((trues - trues.mean()) ** 2).sum()
+    r2 = (1 - ss_res / ss_tot).item()
+    
+    return mae, r2
 
 # ---------------------------------------------------------------------------
 # Main
@@ -224,7 +229,7 @@ def main():
             n_seen += emb.shape[0]
 
         train_mse = total_loss / n_seen
-        val_mae = evaluate(model, val_loader, device)
+        val_mae, val_r2 = evaluate(model, val_loader, device)
         scheduler.step(val_mae)
         lr = optimizer.param_groups[0]["lr"]
         elapsed = time.time() - t0
@@ -233,7 +238,7 @@ def main():
         history.append(row)
         print(
             f"epoch {epoch}/{args.epochs}  "
-            f"train_mse={train_mse:.6f}  val_mae={val_mae:.2f}  "
+            f"train_mse={train_mse:.6f}  val_mae={val_mae:.2f}  r2={val_r2:.3f}  "
             f"lr={lr:.1e}  {elapsed:.0f}s",
             flush=True,
         )
@@ -245,12 +250,14 @@ def main():
 
     # ---- test ----
     model.load_state_dict(torch.load(best_path, weights_only=True))
-    test_mae = evaluate(model, test_loader, device)
-    print(f"\nTest MAE: {test_mae:.2f}  (best epoch {best_epoch}, val MAE {best_val_mae:.2f})", flush=True)
+    test_mae, test_r2 = evaluate(model, test_loader, device)
+    print(f"\nTest MAE: {test_mae:.2f}  R²: {test_r2:.4f}  (best epoch {best_epoch})", flush=True)
+
 
     # ---- save results ----
     results = dict(
         test_mae=round(test_mae, 4),
+        test_r2=round(test_r2, 4),
         best_epoch=best_epoch,
         best_val_mae=round(best_val_mae, 4),
         n_train=len(train_ids),

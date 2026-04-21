@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=60G
-#SBATCH --time=18:00:00
+#SBATCH --time=24:00:00
 #SBATCH --array=0-127
 #SBATCH --exclude=gpu-b11-1,gpu-b11-2,gpu-b11-3
 
@@ -27,4 +27,5 @@ python -u extract_jepa_clips.py \
     --encoder_checkpoint /lab-share/Cardio-Mayourian-e2/Public/Echo_JEPA/checkpoints/echojepa_vitb_bch/latest.pt \
     --output_dir embeddings/shards \
     --num_clips 4 \
-    --batch_size 32
+    --batch_size 32 \
+    --n_tasks 128

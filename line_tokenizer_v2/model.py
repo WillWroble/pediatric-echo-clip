@@ -30,12 +30,13 @@ class LineEncoder(nn.Module):
 
 
 class CrossAttentionPool(nn.Module):
-    """Per-line cross-attention over a study's videos. No W_V — output stays in raw video space."""
+    """Per-line cross-attention over a study's videos"""
 
     def __init__(self, dim=768):
         super().__init__()
         self.W_Q = nn.Linear(dim, dim, bias=False)
         self.W_K = nn.Linear(dim, dim, bias=False)
+        #self.W_V = nn.Linear(dim, dim)
         self.scale = dim ** -0.5
 
     def forward(self, lines, videos, video_mask):
@@ -47,8 +48,9 @@ class CrossAttentionPool(nn.Module):
         """
         Q = self.W_Q(lines)
         K = self.W_K(videos)
+        V = videos #self.W_V(videos)
         scores = torch.einsum("bld,bvd->blv", Q, K) * self.scale
         mask = video_mask.unsqueeze(1) == 0
         scores = scores.masked_fill(mask, -1e9)
         weights = scores.softmax(dim=-1)
-        return torch.einsum("blv,bvd->bld", weights, videos)
+        return torch.einsum("blv,bvd->bld", weights, V)

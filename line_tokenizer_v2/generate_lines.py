@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from scipy.sparse.csgraph import connected_components
 
 from model import LineEncoder, CrossAttentionPool
 from dataset import merge_soft_wraps
+
 
 def load_video_embeddings_by_study(npz_path):
     data = np.load(npz_path)
@@ -93,6 +95,26 @@ def encode_lines(lines, encoder, tokenizer, device, batch_size=512):
     return torch.cat(all_embs, dim=0)
 
 
+def get_or_encode_lines(field, h5_path, pool_manifest, line_filters, encoder, tokenizer, device, cache_dir):
+    cache_path = f"{cache_dir}/{field}_pool_embs.npz"
+
+    if os.path.exists(cache_path):
+        print(f"  Loading cached embeddings from {cache_path}", flush=True)
+        data = np.load(cache_path, allow_pickle=True)
+        return data["lines"].tolist(), torch.from_numpy(data["embeddings"].astype(np.float32))
+
+    lines = collect_pool_lines(h5_path, pool_manifest, line_filters)
+    print(f"  Pool: {len(lines):,} unique lines", flush=True)
+    embs = encode_lines(lines, encoder, tokenizer, device)
+    print(f"  Encoded {len(lines):,} lines", flush=True)
+
+    os.makedirs(cache_dir, exist_ok=True)
+    np.savez(cache_path, lines=np.array(lines), embeddings=embs.numpy())
+    print(f"  Cached to {cache_path}", flush=True)
+
+    return lines, embs
+
+
 @torch.no_grad()
 def score_study(line_embs, videos, pool, device):
     line_embs = line_embs.to(device)
@@ -107,20 +129,31 @@ def score_study(line_embs, videos, pool, device):
     return torch.sigmoid(logits).cpu().numpy()
 
 
-def find_hotspots(scores, line_embs, threshold=0.3, linkage_cutoff=0.85):
+def find_hotspots(scores, line_embs, threshold=0.3, knn=10):
     active = np.where(scores > threshold)[0]
     if len(active) == 0:
         return []
     if len(active) == 1:
         return [[(int(active[0]), float(scores[active[0]]))]]
 
+    # Cosine similarity on active lines
     active_embs = line_embs[active].numpy()
     norms = np.linalg.norm(active_embs, axis=1, keepdims=True) + 1e-8
     active_norm = active_embs / norms
-    sub_sim = active_norm @ active_norm.T
+    sim = active_norm @ active_norm.T
 
-    adjacency = (sub_sim >= linkage_cutoff).astype(np.int32)
-    np.fill_diagonal(adjacency, 0)
+    # Mutual KNN graph
+    n = len(active)
+    k = min(knn, n - 1)
+    top_k = np.argsort(-sim, axis=1)[:, 1:k+1]  # exclude self
+
+    # Build adjacency: mutual = both must have each other in top-k
+    adjacency = np.zeros((n, n), dtype=np.int32)
+    for i in range(n):
+        for j in top_k[i]:
+            if i in top_k[j]:
+                adjacency[i, j] = 1
+                adjacency[j, i] = 1
 
     n_components, labels = connected_components(csr_matrix(adjacency), directed=False)
 
@@ -145,7 +178,7 @@ def main():
     p.add_argument("--fields", nargs="+", default=["study_findings", "summary", "history"])
     p.add_argument("--line_filters", default=None)
     p.add_argument("--threshold", type=float, default=0.3)
-    p.add_argument("--linkage_cutoff", type=float, default=0.85)
+    p.add_argument("--knn", type=int, default=10)
     p.add_argument("--top_k", type=int, default=10)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = p.parse_args()
@@ -163,6 +196,7 @@ def main():
     print("Loaded checkpoint", flush=True)
 
     # Load videos
+    print("Loading video embeddings...", flush=True)
     video_embs = load_video_embeddings_by_study(args.video_embeddings)
     print(f"Loaded {len(video_embs):,} studies with video embeddings", flush=True)
 
@@ -171,21 +205,21 @@ def main():
     ids = [s for s in video_embs.keys() if s in eval_ids]
     print(f"Eval manifest: {len(ids):,} studies", flush=True)
 
-    # Per-field: collect pool lines, encode, load reference lines
+    # Per-field: collect pool lines, encode (or load cache), load reference lines
     pool_lines = {}
     line_embs = {}
     line_to_idx = {}
     study_lines = {}
+    cache_dir = Path(args.output).parent / "pool_cache"
 
     for field in args.fields:
         h5_path = f"{args.h5_dir}/{field}.h5"
         print(f"\n[{field}]", flush=True)
 
-        pool_lines[field] = collect_pool_lines(h5_path, args.pool_manifest, args.line_filters)
-        print(f"  Pool: {len(pool_lines[field]):,} unique lines", flush=True)
-
-        line_embs[field] = encode_lines(pool_lines[field], encoder, tokenizer, device)
-        print(f"  Encoded {len(pool_lines[field]):,} lines", flush=True)
+        pool_lines[field], line_embs[field] = get_or_encode_lines(
+            field, h5_path, args.pool_manifest, args.line_filters,
+            encoder, tokenizer, device, cache_dir
+        )
 
         study_lines[field] = load_study_lines(h5_path, ids, args.line_filters)
         print(f"  Reference: {len(study_lines[field]):,} studies", flush=True)
@@ -201,7 +235,7 @@ def main():
 
         for field in args.fields:
             scores = score_study(line_embs[field], videos, pool, device)
-            hotspots = find_hotspots(scores, line_embs[field], args.threshold, args.linkage_cutoff)
+            hotspots = find_hotspots(scores, line_embs[field], args.threshold, args.knn)
 
             hotspot_data = []
             for h_members in hotspots:
@@ -246,7 +280,7 @@ def main():
     print(f"\nSaved {len(results)} studies to {args.output}", flush=True)
     for field in args.fields:
         total_unmapped = sum(r[field]["n_unmapped"] for r in results)
-        total_ref = sum(len(r[field]["reference"]) + r[field]["n_unmapped"] for r in results)
+        total_ref = sum(len(r[field]["reference"]) for r in results)
         print(f"  {field}: unmapped {total_unmapped}/{total_ref} ({100*total_unmapped/max(total_ref,1):.1f}%)", flush=True)
 
 
