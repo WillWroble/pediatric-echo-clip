@@ -64,11 +64,10 @@ def mutual_knn_hotspots(coords, scores, k=10, score_threshold=0.5):
     nbrs = NearestNeighbors(n_neighbors=k_use + 1, metric="euclidean").fit(high_coords)
     _, indices = nbrs.kneighbors(high_coords)
     
-    # Build mutual graph
     n = len(high_idx)
     adj = lil_matrix((n, n), dtype=bool)
     for i in range(n):
-        for j in indices[i, 1:]:  # skip self
+        for j in indices[i, 1:]:
             if i in indices[j, 1:]:
                 adj[i, j] = True
                 adj[j, i] = True
@@ -85,12 +84,14 @@ def mutual_knn_hotspots(coords, scores, k=10, score_threshold=0.5):
 
 
 def plot_umap_scored(coords, scores, lines, hotspots, title, path, top_n=10):
-    """UMAP colored by score with hotspot landmarks."""
+    """UMAP colored by score with hotspot landmarks. No colorbar."""
     fig, ax = plt.subplots(figsize=(12, 10))
     
-    sc = ax.scatter(coords[:, 0], coords[:, 1], c=scores, cmap="Reds", 
-                    s=3, alpha=0.5, vmin=0, vmax=max(scores.max(), 1))
-    plt.colorbar(sc, ax=ax, label="Score")
+    
+    cmap = plt.cm.Reds
+    colors = cmap(scores)
+    colors[:, 3] = scores ** 2  # squared for sharper falloff
+    ax.scatter(coords[:, 0], coords[:, 1], c=colors, s=3)
     
     colors = plt.cm.tab20(np.linspace(0, 1, max(len(hotspots), 1)))
     for i, (members, peak) in enumerate(hotspots[:top_n]):
@@ -114,14 +115,15 @@ def plot_umap_scored(coords, scores, lines, hotspots, title, path, top_n=10):
 
 
 def plot_umap_reference(coords, scores, lines, ref_indices, title, path, top_n=15):
-    """UMAP colored by score with reference line landmarks."""
+    """UMAP colored by score with reference line landmarks. No colorbar."""
     fig, ax = plt.subplots(figsize=(12, 10))
     
-    sc = ax.scatter(coords[:, 0], coords[:, 1], c=scores, cmap="Reds", 
-                    s=3, alpha=0.5, vmin=0, vmax=max(scores.max(), 1))
-    plt.colorbar(sc, ax=ax, label="Score")
     
-    # Sort reference by score
+    cmap = plt.cm.Reds
+    colors = cmap(scores)
+    colors[:, 3] = scores ** 2  # squared for sharper falloff
+    ax.scatter(coords[:, 0], coords[:, 1], c=colors, s=3)
+    
     ref_sorted = sorted(ref_indices, key=lambda i: scores[i], reverse=True)
     
     colors = plt.cm.tab20(np.linspace(0, 1, max(len(ref_sorted[:top_n]), 1)))
@@ -146,7 +148,7 @@ def plot_umap_reference(coords, scores, lines, ref_indices, title, path, top_n=1
 
 
 def plot_umap_colored(coords, values, title, path, cmap="viridis", label="Value"):
-    """Generic UMAP with color gradient."""
+    """Generic UMAP with color gradient and colorbar."""
     fig, ax = plt.subplots(figsize=(10, 8))
     sc = ax.scatter(coords[:, 0], coords[:, 1], c=values, cmap=cmap, s=3, alpha=0.5)
     plt.colorbar(sc, ax=ax, label=label)

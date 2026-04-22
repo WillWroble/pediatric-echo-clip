@@ -18,4 +18,4 @@ python -u visualize_heatmaps.py \
     --h5_path /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer/data/study_findings.h5 \
     --train_manifest /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/manifests/train_50_modern_nofetal.txt \
     --study_manifest /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer_v2/eval_study_sids.txt \
-    --output_dir /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer_v2/results/v2/visualize_heatmaps
+    --output_dir /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer_v2/results/v2/visualize_heatmaps_v2
