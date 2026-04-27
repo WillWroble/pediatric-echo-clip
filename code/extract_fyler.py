@@ -44,8 +44,8 @@ with open(f'{OUT_DIR}/fyler_lines.csv', 'w', newline='') as f:
     w = csv.writer(f)
     w.writerow(['line', 'fyler_code'])
     for line, code in sorted(lines_seen.items(), key=lambda x: int(x[1])):
-        w.writerow([line, code])
-
+        desc = re.sub(r'\s*\[\d+\]\s*$', '', line)
+        w.writerow([desc, code])
 with open(f'{OUT_DIR}/fyler_labels.csv', 'w', newline='') as f:
     w = csv.writer(f)
     w.writerow(['sid', 'mrn', 'dob', 'gender', 'age', 'event_date', 'location'] + [f'fyler_{c}' for c in all_codes])

@@ -18,9 +18,9 @@ class LineEncoder(nn.Module):
 
         self.proj = nn.Sequential(
             nn.LayerNorm(768),
-            nn.Linear(768, 768),
+            nn.Linear(768, 3072),
             nn.GELU(),
-            nn.Linear(768, 768),
+            nn.Linear(3072, 768),
         )
 
     def forward(self, input_ids, attention_mask):
@@ -36,8 +36,14 @@ class CrossAttentionPool(nn.Module):
         super().__init__()
         self.W_Q = nn.Linear(dim, dim, bias=False)
         self.W_K = nn.Linear(dim, dim, bias=False)
-        #self.W_V = nn.Linear(dim, dim)
+        self.W_V = nn.Linear(dim, dim)
         self.scale = dim ** -0.5
+        self.proj = nn.Sequential(
+            nn.LayerNorm(768),
+            nn.Linear(768, 3072),
+            nn.GELU(),
+            nn.Linear(3072, 768),
+        )
 
     def forward(self, lines, videos, video_mask):
         """
@@ -48,9 +54,12 @@ class CrossAttentionPool(nn.Module):
         """
         Q = self.W_Q(lines)
         K = self.W_K(videos)
-        V = videos #self.W_V(videos)
+        #V = videos
+        V = self.W_V(videos)
         scores = torch.einsum("bld,bvd->blv", Q, K) * self.scale
         mask = video_mask.unsqueeze(1) == 0
         scores = scores.masked_fill(mask, -1e9)
         weights = scores.softmax(dim=-1)
-        return torch.einsum("blv,bvd->bld", weights, V)
+        out = torch.einsum("blv,bvd->bld", weights, V)
+        #return out
+        return self.proj(out)

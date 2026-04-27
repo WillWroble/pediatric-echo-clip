@@ -1,0 +1,22 @@
+#!/bin/bash
+#SBATCH --job-name=eval_fyler
+#SBATCH --gres=gpu:1
+#SBATCH --mem=512G
+#SBATCH --time=4:00:00
+#SBATCH --partition=bch-compute-pe
+#SBATCH --output=/lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer_v2/logs/eval_fyler_%j.out
+#SBATCH --error=/lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer_v2/logs/eval_fyler_%j.err
+
+set -e
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/env
+
+cd /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer_v2
+
+python -u eval_fyler.py \
+    --checkpoint results/v10/best.pt \
+    --fyler_lines /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/fyler_lines.csv \
+    --fyler_labels /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/fyler_labels.csv \
+    --video_embeddings /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/video_pretraining_v2/embeddings/jepa_clips_4x768_fixed.npz \
+    --manifest /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/manifests/val_50_nofetal.txt \
+    --output_dir results/v10/eval_fyler_all_eras_v2
