@@ -118,16 +118,11 @@ def get_or_encode_lines(field, h5_path, pool_manifest, line_filters, encoder, to
 @torch.no_grad()
 def score_study(line_embs, videos, pool, device):
     line_embs = line_embs.to(device)
-    videos_t = torch.from_numpy(videos).to(device)
-
-    Q = pool.W_Q(line_embs)
-    K = pool.W_K(videos_t)
-    attn = (Q @ K.T) * pool.scale
-    attended = attn.softmax(dim=-1) @ videos_t
-
-    logits = (line_embs * attended).sum(dim=-1)
-    return torch.sigmoid(logits).cpu().numpy()
-
+    videos_t = torch.from_numpy(videos).unsqueeze(0).to(device)
+    video_mask = torch.ones(1, videos_t.shape[1], device=device)
+    attended = pool(line_embs.unsqueeze(0), videos_t, video_mask)
+    logits = (line_embs.unsqueeze(0) * attended).sum(dim=-1)
+    return torch.sigmoid(logits).squeeze(0).cpu().numpy()
 
 def find_hotspots(scores, line_embs, threshold=0.3, knn=10):
     active = np.where(scores > threshold)[0]

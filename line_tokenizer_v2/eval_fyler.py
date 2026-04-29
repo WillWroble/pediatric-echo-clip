@@ -141,8 +141,8 @@ def main():
 
     # Score each study
     # Result: per-code max score for each study
-    code_scores = np.zeros((len(study_ids), len(all_codes)), dtype=np.float32)
-    code_labels = np.zeros((len(study_ids), len(all_codes)), dtype=np.float32)
+    line_scores = np.zeros((len(study_ids), len(line_codes)), dtype=np.float32)
+    line_labels = np.zeros((len(study_ids), len(line_codes)), dtype=np.float32)
 
     for i, sid in enumerate(study_ids):
         if (i + 1) % 500 == 0:
@@ -155,32 +155,30 @@ def main():
 
         raw_scores = score_study(encoder, pool, line_embs, vids, device)
 
-        for j, code in enumerate(all_codes):
-            idxs = code_to_line_idx.get(code)
-            if idxs:
-                code_scores[i, j] = raw_scores[idxs].max()
-            code_labels[i, j] = labels_by_sid[sid].get(code, 0)
+        for j in range(len(line_codes)):
+            line_scores[i, j] = raw_scores[j]
+            line_labels[i, j] = labels_by_sid[sid].get(line_codes[j], 0)
 
-    # Compute AUROC per code
+
+    # Compute AUROC per line
     results = {}
-    for j, code in enumerate(all_codes):
-        y = code_labels[:, j]
+    for j in range(len(line_codes)):
+        y = line_labels[:, j]
         n_pos = int(y.sum())
         if n_pos == 0 or n_pos == len(y):
             continue
-        auc = roc_auc_score(y, code_scores[:, j])
-        results[code] = {"auroc": round(auc, 4), "n_pos": n_pos}
+        auc = roc_auc_score(y, line_scores[:, j])
+        results[j] = {"auroc": round(auc, 4), "n_pos": n_pos,
+                       "code": line_codes[j], "line": line_texts[j]}
 
-    # Sort by AUROC descending
     ranked = sorted(results.items(), key=lambda x: -x[1]["auroc"])
 
-    print(f"\n{'Code':>6}  {'AUROC':>7}  {'N+':>6}  Description")
-    print("-" * 70)
-    for code, r in ranked[:50]:
-        desc = line_texts[line_codes.index(code)][:40]
-        print(f"{code:>6}  {r['auroc']:>7.4f}  {r['n_pos']:>6}  {desc}")
+    print(f"\n{'Code':>6}  {'AUROC':>7}  {'N+':>6}  Line")
+    print("-" * 80)
+    for idx, r in ranked[:50]:
+        print(f"{r['code']:>6}  {r['auroc']:>7.4f}  {r['n_pos']:>6}  {r['line'][:50]}")
 
-    print(f"\n{len(results)} codes evaluated (skipped {len(all_codes) - len(results)} with 0 or all positives)")
+    print(f"\n{len(results)} lines evaluated")
     aurocs = [r["auroc"] for r in results.values()]
     print(f"Mean AUROC: {np.mean(aurocs):.4f}  Median: {np.median(aurocs):.4f}")
 
@@ -191,16 +189,16 @@ def main():
     np.savez(out / "fyler_scores.npz",
              study_ids=np.array(study_ids),
              codes=np.array(all_codes),
-             scores=code_scores,
-             labels=code_labels)
+             scores=line_scores,
+             labels=line_labels)
     print(f"\nSaved to {out}")
 
     with open(out / "fyler_aurocs.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["code", "description", "auroc", "n_pos"])
-        for code, r in ranked:
-            desc = line_texts[line_codes.index(code)].lstrip("• ")
-            w.writerow([code, desc, r["auroc"], r["n_pos"]])
+        w.writerow(["code", "line", "auroc", "n_pos"])
+        for idx, r in ranked:
+            w.writerow([r["code"], r["line"].lstrip("• "), r["auroc"], r["n_pos"]])
+
 
 
 if __name__ == "__main__":

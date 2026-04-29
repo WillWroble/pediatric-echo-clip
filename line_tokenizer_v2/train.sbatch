@@ -20,4 +20,4 @@ python -u train.py \
     --val_manifest /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/manifests/val_50_nofetal.txt \
     --line_filters /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer/ignore_patterns.txt \
     --fields study_findings summary history \
-    --output_dir /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer_v2/results/v10
+    --output_dir /lab-share/Cardio-Mayourian-e2/Public/Echo_Clip/line_tokenizer_v2/results/v12
