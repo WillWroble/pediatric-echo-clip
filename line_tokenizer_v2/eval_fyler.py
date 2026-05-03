@@ -34,7 +34,7 @@ def load_fyler_lines(path):
     return texts, codes
 
 
-def load_fyler_labels(path):
+def load_fyler_labels(path, keep_sids=None):
     """Returns {sid_str: {code: 0/1}} and sorted list of all codes."""
     with open(path) as f:
         reader = csv.DictReader(f)
@@ -43,6 +43,8 @@ def load_fyler_labels(path):
         labels = {}
         for row in reader:
             sid = str(int(float(row['sid'])))
+            if keep_sids and sid not in keep_sids:
+                continue
             labels[sid] = {c.replace('fyler_', ''): int(row[c]) for c in code_cols}
     all_codes = sorted([c.replace('fyler_', '') for c in code_cols], key=int)
     return labels, all_codes
@@ -94,11 +96,14 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
+    # Load manifest
+    manifest = set(str(int(float(x))) for x in
+                   Path(args.manifest).read_text().strip().splitlines())
     # Load Fyler data
     line_texts, line_codes = load_fyler_lines(args.fyler_lines)
     print(f"Loaded {len(line_texts)} Fyler lines", flush=True)
 
-    labels_by_sid, all_codes = load_fyler_labels(args.fyler_labels)
+    labels_by_sid, all_codes = load_fyler_labels(args.fyler_labels, keep_sids=manifest)
     print(f"Loaded labels for {len(labels_by_sid)} studies, {len(all_codes)} codes", flush=True)
 
     # Build line index -> code mapping, and code -> line indices
@@ -106,58 +111,73 @@ def main():
     for i, code in enumerate(line_codes):
         code_to_line_idx[code].append(i)
 
-    # Load manifest
-    manifest = set(str(int(float(x))) for x in
-                   Path(args.manifest).read_text().strip().splitlines())
 
-    # Load video embeddings
-    data = np.load(args.video_embeddings)
-    embs, sids = data["embeddings"], data["study_ids"].astype(str)
-    videos_by_study = {}
-    for emb, sid in zip(embs, sids):
-        sid = str(int(float(sid)))
-        videos_by_study.setdefault(sid, []).append(emb)
-    videos_by_study = {k: np.stack(v).astype(np.float32)
-                       for k, v in videos_by_study.items()}
+    
+    cache_path = Path(args.output_dir) / "fyler_scores.npz"
+    if cache_path.exists():
+        print(f"Loading cached scores from {cache_path}", flush=True)
+        cached = np.load(cache_path)
+        line_scores = cached["scores"]
+        #line_labels = cached["labels"]
+        study_ids = cached["study_ids"].tolist()
+        
+        keep = [i for i, sid in enumerate(study_ids) if sid in manifest and sid in labels_by_sid]
+        study_ids = [study_ids[i] for i in keep]
+        line_scores = line_scores[keep]
+        
+        line_labels = np.zeros((len(study_ids), len(line_codes)), dtype=np.float32)
+        for i, sid in enumerate(study_ids):
+            for j in range(len(line_codes)):
+                line_labels[i, j] = labels_by_sid[sid].get(line_codes[j], 0)
+        print(f"Loaded {line_scores.shape[0]} studies x {line_scores.shape[1]} lines", flush=True)
+    else:
+        # Load video embeddings
+        data = np.load(args.video_embeddings)
+        embs, sids = data["embeddings"], data["study_ids"].astype(str)
+        videos_by_study = {}
+        for emb, sid in zip(embs, sids):
+            sid = str(int(float(sid)))
+            videos_by_study.setdefault(sid, []).append(emb)
+        videos_by_study = {k: np.stack(v).astype(np.float32)
+                           for k, v in videos_by_study.items()}
 
-    # Intersect: manifest ∩ videos ∩ labels
-    study_ids = sorted(sid for sid in manifest
-                       if sid in videos_by_study and sid in labels_by_sid)
-    print(f"{len(study_ids)} studies with videos + labels in manifest", flush=True)
+        # Intersect: manifest ∩ videos ∩ labels
+        study_ids = sorted(sid for sid in manifest
+                           if sid in videos_by_study and sid in labels_by_sid)
+        print(f"{len(study_ids)} studies with videos + labels in manifest", flush=True)
 
-    # Load model
-    encoder = LineEncoder().to(device)
-    pool = CrossAttentionPool().to(device)
-    ckpt = torch.load(args.checkpoint, map_location=device, weights_only=True)
-    encoder.load_state_dict(ckpt["encoder"])
-    pool.load_state_dict(ckpt["attn_pool"])
-    encoder.eval()
-    pool.eval()
+        # Load model
+        encoder = LineEncoder().to(device)
+        pool = CrossAttentionPool().to(device)
+        ckpt = torch.load(args.checkpoint, map_location=device, weights_only=True)
+        encoder.load_state_dict(ckpt["encoder"])
+        pool.load_state_dict(ckpt["attn_pool"])
+        encoder.eval()
+        pool.eval()
 
-    # Encode all Fyler lines
-    tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-    line_embs = encode_lines(line_texts, tokenizer, encoder, device)
-    print(f"Encoded {line_embs.shape[0]} lines -> {line_embs.shape[1]}d", flush=True)
+        # Encode all Fyler lines
+        tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
+        line_embs = encode_lines(line_texts, tokenizer, encoder, device)
+        print(f"Encoded {line_embs.shape[0]} lines -> {line_embs.shape[1]}d", flush=True)
 
-    # Score each study
-    # Result: per-code max score for each study
-    line_scores = np.zeros((len(study_ids), len(line_codes)), dtype=np.float32)
-    line_labels = np.zeros((len(study_ids), len(line_codes)), dtype=np.float32)
+        # Score each study
+        line_scores = np.zeros((len(study_ids), len(line_codes)), dtype=np.float32)
+        line_labels = np.zeros((len(study_ids), len(line_codes)), dtype=np.float32)
 
-    for i, sid in enumerate(study_ids):
-        if (i + 1) % 500 == 0:
-            print(f"  Scoring {i+1}/{len(study_ids)}...", flush=True)
+        for i, sid in enumerate(study_ids):
+            if (i + 1) % 500 == 0:
+                print(f"  Scoring {i+1}/{len(study_ids)}...", flush=True)
 
-        vids = videos_by_study[sid]
-        if vids.shape[0] > args.max_videos:
-            idx = np.random.choice(vids.shape[0], args.max_videos, replace=False)
-            vids = vids[idx]
+            vids = videos_by_study[sid]
+            if vids.shape[0] > args.max_videos:
+                idx = np.random.choice(vids.shape[0], args.max_videos, replace=False)
+                vids = vids[idx]
 
-        raw_scores = score_study(encoder, pool, line_embs, vids, device)
+            raw_scores = score_study(encoder, pool, line_embs, vids, device)
 
-        for j in range(len(line_codes)):
-            line_scores[i, j] = raw_scores[j]
-            line_labels[i, j] = labels_by_sid[sid].get(line_codes[j], 0)
+            for j in range(len(line_codes)):
+                line_scores[i, j] = raw_scores[j]
+                line_labels[i, j] = labels_by_sid[sid].get(line_codes[j], 0)
 
 
     # Compute AUROC per line

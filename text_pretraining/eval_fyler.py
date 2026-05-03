@@ -72,6 +72,8 @@ def main():
     p.add_argument("--min_pos_train", type=int, default=5)
     p.add_argument("--min_pos_val", type=int, default=5)
     p.add_argument("--output_dir", required=True)
+    p.add_argument("--train_manifest", default=None)
+    p.add_argument("--val_manifest", default=None)
     args = p.parse_args()
 
     out = Path(args.output_dir)
@@ -79,6 +81,20 @@ def main():
 
     Z_train, train_ids, Z_val, val_ids = load_embeddings(args.embeddings)
     print(f"Train: {Z_train.shape}, Val: {Z_val.shape}", flush=True)
+
+
+    if args.train_manifest:
+        keep = set(str(int(float(x))) for x in Path(args.train_manifest).read_text().strip().splitlines())
+        mask = [i for i, sid in enumerate(train_ids) if sid in keep]
+        Z_train = Z_train[mask]
+        train_ids = [train_ids[i] for i in mask]
+
+    if args.val_manifest:
+        keep = set(str(int(float(x))) for x in Path(args.val_manifest).read_text().strip().splitlines())
+        mask = [i for i, sid in enumerate(val_ids) if sid in keep]
+        Z_val = Z_val[mask]
+        val_ids = [val_ids[i] for i in mask]
+
 
     labels_by_sid, all_codes, code_cols = load_fyler_labels(args.fyler_labels)
     print(f"Labels: {len(labels_by_sid)} studies, {len(all_codes)} codes", flush=True)
