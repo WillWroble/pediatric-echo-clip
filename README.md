@@ -129,7 +129,10 @@ All are different readouts of the same trained system:
 ## Related Work
 
 - **EchoFocus-CHD** (Lukyanenko, Mayourian et al.): Supervised CHD detection on PanEcho. Preprint: doi:10.64898/2026.01.24.26344771
+- **EchoJEPA** (Munim et al., arXiv 2026): Latent predictive foundation model trained on 18M echocardiograms across 300K adult patients. Demonstrates that JEPA pretraining produces representations robust to ultrasound speckle and acquisition artifacts, with strong zero-shot transfer to pediatric data. EchoVALE uses an independently trained JEPA backbone (ViT-B, initialized from V-JEPA 2.1) on BCH pediatric data as its vision encoder.
 - **VL-JEPA** (Chen et al., Meta FAIR, Dec 2024): Vision-language JEPA that predicts continuous answer embeddings instead of generating tokens. EchoVALE shares the embedding-space prediction thesis but differs architecturally (cross-attention scoring vs. joint self-attention prediction) and constrains the answer space to binary relevance.
+- **EchoPrime** (Vukadinovic et al., Nature 2025): older Vision-Language contrastive architecture for echos. Uses Clinical BERT for line encoding but pre aggregates the entire report instead of keeping clinical lines seperate.  
+
 
 ## Folder Structure
 
