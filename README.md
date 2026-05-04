@@ -55,6 +55,7 @@ EchoJEPA ViT-B pretrained on BCH pediatric echo data, initialized from V-JEPA 2.
 ### Fyler Code Classification (2020+ evaluation set)
 
 v11, JEPA backbone, excluding trivial/ruled-out labels, using the best line variant per code:
+- Number of codes evaluated: 2481
 - Mean AUROC: 0.8260
 - Median AUROC: 0.8767
 - N-weighted mean: 0.851
