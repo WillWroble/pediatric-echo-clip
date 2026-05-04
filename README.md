@@ -37,9 +37,11 @@ EchoJEPA ViT-B pretrained on BCH pediatric echo data, initialized from V-JEPA 2.
 
 **Scoring**: Dot product between the cross-attention output (line-relative study representation) and the raw line embedding, passed through sigmoid, yielding a per-line relevance score.
 
-**Training objective**: Skip-gram BCE. Each field-study pair is treated as a separate training sample. Lines co-occurring in the same field of the same report are positives; randomly sampled lines are negatives. Each line scored independently with no softmax forcing competition between lines. Following VL-JEPA (Chen et al., Meta FAIR, 2024), EchoVALE operates entirely in embedding space rather than autoregressively generating tokens, further constraining the answer space to binary relevance and concentrating representational power on the query side.
+**Training objective**: Skip-gram BCE. Over 3 fields: findings, summary, and history. Each field-study pair is treated as a separate training sample. For each pair we sample 2 positive lines (lines occurring in the matching field) and 10 negative lines (randomly sampled from the entire pool). Both samplings are down-weighted by frequency. Each lines score is then compared with the binary occurence labels and loss is computed through BCE. 
 
-**Current best**: v11 (JEPA base, W_V, post-CA MLP, 4x BERT expansion). no Post-CA MLP (v6) performs better on pre 2020 studies but hurts overall Fyler AUROCs. Ablations ongoing (v12-v16).
+Following VL-JEPA (Chen et al., Meta FAIR, 2025), EchoVALE operates entirely in embedding space rather than autoregressively generating tokens, further constraining the answer space to binary relevance and concentrating representational power on the query side.
+
+**Current best**: v11 (JEPA base, W_V, post-CA MLP, 4x post-BERT expansion, 2 BERT layers unfrozen). Ablations ongoing (v12-v16).
 
 ### Generation (`generate_lines.py`)
 
